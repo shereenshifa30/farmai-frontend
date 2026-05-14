@@ -421,12 +421,12 @@ function VoiceModal({ onClose, navigate }) {
   const process = (text) => {
     const lower = text.toLowerCase();
     if (lower.includes("help") || lower.includes("how") || lower.includes("what") || lower.includes("உதவி")) {
-      setResp(HELP_EN + " | " + HELP_TA); speak(HELP_EN); return;
+     setResp(HELP_EN); speak(HELP_EN); return;
     }
     for (const cmd of CMDS) {
       if (cmd.keys.some(k => lower.includes(k))) {
         const r = cmd.reply_en;
-        setResp(r + " | " + cmd.reply_ta);
+        setResp(r);
         speak(r);
         setTimeout(() => { navigate(cmd.page); onClose(); }, 1500);
         return;
@@ -677,18 +677,30 @@ function WeatherPage({ onRainAlert }) {
   const [error,setError]=useState(""); const [spin,setSpin]=useState(false);
   const alertShown = useRef(false);
 
-  const fetchWeather=async(city)=>{
-    setLoading(true); setError("");
-    try{
-      const res=await api.get(`/weather/${city}`);
-      if(res.error){setError(res.error);}
-      else{
-        setData(res); setLoc(city);
-        if(res.has_rain_alert && !alertShown.current){ alertShown.current=true; onRainAlert(); }
+ const fetchWeather = async (city) => {
+  setLoading(true); setError("");
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60000); // 60 sec timeout
+    const res = await fetch(`${API}/weather/${city}`, { signal: controller.signal });
+    clearTimeout(timeout);
+    const data = await res.json();
+    if (data.error) { setError(data.error); }
+    else {
+      setData(data); setLoc(city);
+      if (data.has_rain_alert && !alertShown.current) {
+        alertShown.current = true; onRainAlert();
       }
-    }catch(e){setError("Cannot connect to backend. Check that it is running.");}
-    setLoading(false);
-  };
+    }
+  } catch(e) {
+    if (e.name === "AbortError") {
+      setError("Backend is waking up (Render free tier). Please wait 30 seconds and click refresh ↻");
+    } else {
+      setError("Cannot connect to backend. Please try again.");
+    }
+  }
+  setLoading(false);
+};
   useEffect(()=>{fetchWeather("Madurai");},[]);
   const refresh=()=>{setSpin(true);fetchWeather(loc);setTimeout(()=>setSpin(false),900);};
   const getDayName=(dateStr,i)=>{ if(i===0)return"Today"; return new Date(dateStr).toLocaleDateString("en",{weekday:"short"}); };
