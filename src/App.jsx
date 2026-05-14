@@ -4,9 +4,34 @@ import { useState, useRef, useEffect } from "react";
 
 const API = "https://farmai-backendd.onrender.com";
 const api = {
-  get: async (path) => { const r = await fetch(`${API}${path}`); return r.json(); },
-  post: async (path, body) => { const r = await fetch(`${API}${path}`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) }); return r.json(); },
-  upload: async (path, file) => { const f = new FormData(); f.append("file", file); const r = await fetch(`${API}${path}`, { method:"POST", body:f }); return r.json(); },
+  get: async (path) => {
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 60000);
+    try {
+      const r = await fetch(`${API}${path}`, { signal: ctrl.signal });
+      clearTimeout(tid);
+      if (!r.ok) throw new Error(`Server error ${r.status}`);
+      return r.json();
+    } catch(e) {
+      clearTimeout(tid);
+      if (e.name === "AbortError") throw new Error("TIMEOUT");
+      throw e;
+    }
+  },
+  post: async (path, body) => {
+    const r = await fetch(`${API}${path}`, {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(body)
+    });
+    return r.json();
+  },
+  upload: async (path, file) => {
+    const f = new FormData();
+    f.append("file", file);
+    const r = await fetch(`${API}${path}`, { method:"POST", body:f });
+    return r.json();
+  },
 };
 
 const Icons = {
@@ -672,85 +697,149 @@ function AuthPage({ mode, setPage, setLoggedIn, showToast }) {
 
 // ── WEATHER ───────────────────────────────────────────────────────────────────
 function WeatherPage({ onRainAlert }) {
-  const [loc,setLoc]=useState("Madurai"); const [input,setInput]=useState("Madurai");
-  const [data,setData]=useState(null); const [loading,setLoading]=useState(false);
-  const [error,setError]=useState(""); const [spin,setSpin]=useState(false);
-  const alertShown = useRef(false);
+  const [loc,setLoc]       = useState("Madurai");
+  const [input,setInput]   = useState("Madurai");
+  const [data,setData]     = useState(null);
+  const [loading,setLoading] = useState(false);
+  const [error,setError]   = useState("");
+  const [spin,setSpin]     = useState(false);
+  const [waking,setWaking] = useState(false);
+  const alertShown         = useRef(false);
 
- const fetchWeather = async (city) => {
-  setLoading(true); setError("");
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 60000); // 60 sec timeout
-    const res = await fetch(`${API}/weather/${city}`, { signal: controller.signal });
-    clearTimeout(timeout);
-    const data = await res.json();
-    if (data.error) { setError(data.error); }
-    else {
-      setData(data); setLoc(city);
-      if (data.has_rain_alert && !alertShown.current) {
-        alertShown.current = true; onRainAlert();
+  const fetchWeather = async (city) => {
+    setLoading(true); setError(""); setWaking(false);
+    const timer = setTimeout(() => setWaking(true), 8000);
+    try {
+      const res = await api.get(`/weather/${city}`);
+      clearTimeout(timer);
+      if (res.error) {
+        setError(res.error);
+      } else {
+        setData(res); setLoc(city); setWaking(false);
+        if (res.has_rain_alert && !alertShown.current) {
+          alertShown.current = true; onRainAlert();
+        }
+      }
+    } catch(e) {
+      clearTimeout(timer);
+      if (e.message === "TIMEOUT") {
+        setError("⏳ Backend is starting up (Render free tier takes 30–60 sec on first load). Click ↻ Refresh to try again.");
+      } else {
+        setError("Cannot connect to backend. Please try again.");
       }
     }
-  } catch(e) {
-    if (e.name === "AbortError") {
-      setError("Backend is waking up (Render free tier). Please wait 30 seconds and click refresh ↻");
-    } else {
-      setError("Cannot connect to backend. Please try again.");
-    }
-  }
-  setLoading(false);
-};
-  useEffect(()=>{fetchWeather("Madurai");},[]);
-  const refresh=()=>{setSpin(true);fetchWeather(loc);setTimeout(()=>setSpin(false),900);};
-  const getDayName=(dateStr,i)=>{ if(i===0)return"Today"; return new Date(dateStr).toLocaleDateString("en",{weekday:"short"}); };
+    setLoading(false); setWaking(false);
+  };
+
+  useEffect(() => { fetchWeather("Madurai"); }, []);
+
+  const refresh = () => {
+    setSpin(true);
+    fetchWeather(loc);
+    setTimeout(() => setSpin(false), 900);
+  };
+
+  const getDayName = (dateStr, i) => {
+    if (i === 0) return "Today";
+    return new Date(dateStr).toLocaleDateString("en", { weekday:"short" });
+  };
 
   return (
     <div className="inner-page page-enter">
       <div className="inner-content">
         <h1 className="pg-heading">Weather</h1>
         <p className="pg-sub">Current conditions and 5-day forecast for your farm.</p>
+
         <div className="card">
           <div className="card-header">
-            <div className="card-title"><IC name="Sun" size={18} color="var(--orange)"/>Weather</div>
+            <div className="card-title">
+              <IC name="Sun" size={18} color="var(--orange)"/>Weather
+            </div>
             <div className="card-actions">
               <div className="w-loc-wrap">
                 <IC name="MapPin" size={14} color="var(--tl)"/>
-                <input className="w-loc-inp" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&fetchWeather(input)}/>
+                <input
+                  className="w-loc-inp"
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && fetchWeather(input)}
+                />
               </div>
-              <button className="w-go" onClick={()=>fetchWeather(input)}>Go</button>
-              <button className={`icon-btn${spin?" spinning":""}`} onClick={refresh}><Icons.RefreshCw/></button>
+              <button className="w-go" onClick={() => fetchWeather(input)}>Go</button>
+              <button className={`icon-btn${spin?" spinning":""}`} onClick={refresh}>
+                <Icons.RefreshCw/>
+              </button>
             </div>
           </div>
+
           <div className="card-body">
-            {loading&&<div style={{display:"flex",alignItems:"center",gap:"0.75rem",color:"var(--tl)"}}><div className="spinner dk"/>Fetching weather data...</div>}
-            {error&&<div className="err-msg">{error}</div>}
-            {data&&!loading&&(<>
-              <div className="w-temp">{Math.round(data.current.temp_c)}°C</div>
-              <div className="w-cond"><IC name="Sun" size={18}/>{data.current.condition}</div>
-              <div className="w-loc-tag">{data.current.city}, {data.current.region}, {data.current.country}</div>
-              <div className="w-meta">
-                <div className="w-meta-item"><IC name="Droplets" size={15}/>{data.current.humidity}%</div>
-                <div className="w-meta-item"><IC name="Wind" size={15}/>{data.current.wind_kph} km/h</div>
-                <div className="w-meta-item"><IC name="Sun" size={15}/>UV: {data.current.uv}</div>
-              </div>
-              <div className="forecast-grid">
-                {data.forecast.map((f,i)=>(
-                  <div key={i} className="fday">
-                    <div className="fday-lbl">{getDayName(f.date,i)}</div>
-                    <div className="fday-icon"><IC name={f.rain_chance>50?"CloudRain":"Sun"} size={24}/></div>
-                    <div className="fday-temp">{Math.round(f.max_temp)}°</div>
-                    <div className="fday-rain">{f.rain_chance}% rain</div>
-                  </div>
-                ))}
-              </div>
-              {data.advice?.length>0&&(
-                <div className="advice-box">
-                  <p className="advice-title">🌾 Farming Advice</p>
-                  {data.advice.map((a,i)=><p key={i} className="advice-item">{a}</p>)}
+            {/* Loading state */}
+            {loading && (
+              <div style={{textAlign:"center", padding:"2rem"}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:"0.75rem",color:"var(--tl)",marginBottom:"1rem"}}>
+                  <div className="spinner dk"/>
+                  <span>{waking ? "Backend is waking up... please wait (30–60 sec)" : "Fetching weather data..."}</span>
                 </div>
-              )}
-            </>)}
+                {waking && (
+                  <div style={{background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:10,padding:"1rem",fontSize:"0.88rem",color:"#b45309",maxWidth:400,margin:"0 auto"}}>
+                    ⚠️ Render free tier sleeps after inactivity. First load takes up to 60 seconds. Please wait...
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Error state */}
+            {error && !loading && (
+              <div>
+                <div className="err-msg">{error}</div>
+                <button
+                  onClick={refresh}
+                  style={{display:"flex",alignItems:"center",gap:"0.5rem",padding:"0.7rem 1.5rem",borderRadius:10,background:"var(--g800)",color:"white",border:"none",cursor:"pointer",fontSize:"0.9rem",fontWeight:600,marginTop:"0.75rem"}}
+                >
+                  <Icons.RefreshCw/> Try Again
+                </button>
+              </div>
+            )}
+
+            {/* Weather data */}
+            {data && !loading && (
+              <>
+                <div className="w-temp">{Math.round(data.current.temp_c)}°C</div>
+                <div className="w-cond">
+                  <IC name="Sun" size={18}/>{data.current.condition}
+                </div>
+                <div className="w-loc-tag">
+                  {data.current.city}, {data.current.region}, {data.current.country}
+                </div>
+                <div className="w-meta">
+                  <div className="w-meta-item"><IC name="Droplets" size={15}/>{data.current.humidity}%</div>
+                  <div className="w-meta-item"><IC name="Wind" size={15}/>{data.current.wind_kph} km/h</div>
+                  <div className="w-meta-item"><IC name="Sun" size={15}/>UV: {data.current.uv}</div>
+                </div>
+
+                <div className="forecast-grid">
+                  {(data.forecast || []).map((f, i) => (
+                    <div key={i} className="fday">
+                      <div className="fday-lbl">{getDayName(f.date, i)}</div>
+                      <div className="fday-icon">
+                        <IC name={f.rain_chance > 50 ? "CloudRain" : "Sun"} size={24}/>
+                      </div>
+                      <div className="fday-temp">{Math.round(f.max_temp)}°</div>
+                      <div className="fday-rain">{f.rain_chance}% rain</div>
+                    </div>
+                  ))}
+                </div>
+
+                {data.advice?.length > 0 && (
+                  <div className="advice-box">
+                    <p className="advice-title">🌾 Farming Advice</p>
+                    {data.advice.map((a, i) => (
+                      <p key={i} className="advice-item">{a}</p>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
       </div>
