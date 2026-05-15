@@ -1,6 +1,23 @@
 
 
 import { useState, useRef, useEffect } from "react";
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError: false }; }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:"1rem",background:"#f5f0e8"}}>
+          <p style={{fontSize:"1.1rem",color:"#4a6355"}}>Something went wrong loading this page.</p>
+          <button onClick={()=>this.setState({hasError:false})} style={{padding:"0.75rem 1.5rem",background:"#1e4d35",color:"white",border:"none",borderRadius:10,cursor:"pointer",fontSize:"0.95rem"}}>
+            Try Again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const API = "https://farmai-backendd.onrender.com";
 const api = {
@@ -802,44 +819,42 @@ function WeatherPage({ onRainAlert }) {
             )}
 
             {/* Weather data */}
-            {data && !loading && (
-              <>
-                <div className="w-temp">{Math.round(data.current.temp_c)}°C</div>
-                <div className="w-cond">
-                  <IC name="Sun" size={18}/>{data.current.condition}
-                </div>
-                <div className="w-loc-tag">
-                  {data.current.city}, {data.current.region}, {data.current.country}
-                </div>
-                <div className="w-meta">
-                  <div className="w-meta-item"><IC name="Droplets" size={15}/>{data.current.humidity}%</div>
-                  <div className="w-meta-item"><IC name="Wind" size={15}/>{data.current.wind_kph} km/h</div>
-                  <div className="w-meta-item"><IC name="Sun" size={15}/>UV: {data.current.uv}</div>
-                </div>
-
-                <div className="forecast-grid">
-                  {(data.forecast || []).map((f, i) => (
-                    <div key={i} className="fday">
-                      <div className="fday-lbl">{getDayName(f.date, i)}</div>
-                      <div className="fday-icon">
-                        <IC name={f.rain_chance > 50 ? "CloudRain" : "Sun"} size={24}/>
-                      </div>
-                      <div className="fday-temp">{Math.round(f.max_temp)}°</div>
-                      <div className="fday-rain">{f.rain_chance}% rain</div>
-                    </div>
-                  ))}
-                </div>
-
-                {data.advice?.length > 0 && (
-                  <div className="advice-box">
-                    <p className="advice-title">🌾 Farming Advice</p>
-                    {data.advice.map((a, i) => (
-                      <p key={i} className="advice-item">{a}</p>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
+            {data && !loading && !error && (
+  <>
+    <div className="w-temp">{Math.round(data?.current?.temp_c ?? 0)}°C</div>
+    <div className="w-cond">
+      <IC name="Sun" size={18}/>{data?.current?.condition ?? ""}
+    </div>
+    <div className="w-loc-tag">
+      {data?.current?.city ?? loc}, {data?.current?.region ?? ""}, {data?.current?.country ?? ""}
+    </div>
+    <div className="w-meta">
+      <div className="w-meta-item"><IC name="Droplets" size={15}/>{data?.current?.humidity ?? 0}%</div>
+      <div className="w-meta-item"><IC name="Wind" size={15}/>{data?.current?.wind_kph ?? 0} km/h</div>
+      <div className="w-meta-item"><IC name="Sun" size={15}/>UV: {data?.current?.uv ?? 0}</div>
+    </div>
+    <div className="forecast-grid">
+      {(data?.forecast ?? []).map((f, i) => (
+        <div key={i} className="fday">
+          <div className="fday-lbl">{i === 0 ? "Today" : new Date(f.date).toLocaleDateString("en",{weekday:"short"})}</div>
+          <div className="fday-icon">
+            <IC name={(f?.rain_chance ?? 0) > 50 ? "CloudRain" : "Sun"} size={24}/>
+          </div>
+          <div className="fday-temp">{Math.round(f?.max_temp ?? 0)}°</div>
+          <div className="fday-rain">{f?.rain_chance ?? 0}% rain</div>
+        </div>
+      ))}
+    </div>
+    {(data?.advice ?? []).length > 0 && (
+      <div className="advice-box">
+        <p className="advice-title">🌾 Farming Advice</p>
+        {(data.advice ?? []).map((a, i) => (
+          <p key={i} className="advice-item">{a}</p>
+        ))}
+      </div>
+    )}
+  </>
+)}
           </div>
         </div>
       </div>
@@ -1223,7 +1238,7 @@ export default function App() {
       {page==="home"        && <HomePage   setPage={nav} setVoiceOpen={setVoice} loggedIn={loggedIn}/>}
       {page==="login"       && <AuthPage   mode="login"  setPage={nav} setLoggedIn={setLoggedIn} showToast={showToast}/>}
       {page==="signup"      && <AuthPage   mode="signup" setPage={nav} setLoggedIn={setLoggedIn} showToast={showToast}/>}
-      {page==="weather"     && <WeatherPage onRainAlert={()=>setRainAlert(true)}/>}
+      {page==="weather" && <ErrorBoundary><WeatherPage onRainAlert={()=>setRainAlert(true)}/></ErrorBoundary>}
       {page==="soil"        && <SoilPage   showToast={showToast}/>}
       {page==="market"      && <MarketPage/>}
       {page==="detect-crop" && <DetectPage showToast={showToast}/>}
